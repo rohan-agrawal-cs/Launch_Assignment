@@ -16,7 +16,9 @@
       "urls": [
         "/blog/latest",
         "/blog/ai",
-        "/blog/generativeai"
+        "/blog/generativeai",
+        "/blog/chatgpt",
+        "/"
       ]
     }
   }

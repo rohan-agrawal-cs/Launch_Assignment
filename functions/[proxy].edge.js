@@ -1,7 +1,6 @@
-import jwt from '@tsndr/cloudflare-worker-jwt';
+import jwt from "@tsndr/cloudflare-worker-jwt";
 
 export default async function handler(request, context) {
-
   const url = new URL(request.url);
   const hostname = url.hostname;
   const pathname = url.pathname;
@@ -10,11 +9,9 @@ export default async function handler(request, context) {
   // PASSWORD PROTECTION FOR TEST DOMAINS
   // ============================================
 
-  const testDomains = [
-    "launchassignment-test.contentstackapps.com"
-  ];
+  const testDomains = ["launchassignment-test.contentstackapps.com"];
 
-  const isTestDomain = testDomains.some(domain => hostname.includes(domain));
+  const isTestDomain = testDomains.some((domain) => hostname.includes(domain));
 
   // Password-protect homepage on test domains
   if (pathname === "/" && isTestDomain) {
@@ -24,11 +21,10 @@ export default async function handler(request, context) {
     };
 
     const authResponse = handlePasswordProtection(request, passwordProtection);
-    
+
     if (authResponse) {
       return authResponse; // Return 401 if auth failed
     }
-
   }
 
   // ============================================
@@ -40,11 +36,14 @@ export default async function handler(request, context) {
   // Only redirect India users, let everyone else pass through normally
   if (country === "IN" && pathname === "/") {
     console.log(`[LOCALE] Setting hi-in cookie for India user on homepage`);
-    
+
     // Set cookie without redirecting - user stays on /
     const response = await fetch(request);
     const modifiedResponse = new Response(response.body, response);
-    modifiedResponse.headers.set("Set-Cookie", "NEXT_LOCALE=hi-in; Path=/; Max-Age=31536000");
+    modifiedResponse.headers.set(
+      "Set-Cookie",
+      "NEXT_LOCALE=hi-in; Path=/; Max-Age=31536000",
+    );
     return modifiedResponse;
   }
 
@@ -56,8 +55,7 @@ export default async function handler(request, context) {
 
   if (pathname === "/blog/latest") {
     cacheControl = "public, max-age=30, stale-while-revalidate=30";
-  }
-  else if (pathname.startsWith("/blog/") && pathname !== "/blog/latest") {
+  } else if (pathname.startsWith("/blog/") && pathname !== "/blog/latest") {
     cacheControl = "public, max-age=600, stale-while-revalidate=300";
   }
 
@@ -66,14 +64,13 @@ export default async function handler(request, context) {
   // ============================================
 
   if (url.pathname === "/automate/trigger" && request.method === "POST") {
-
     const pathToRevalidate = url.searchParams.get("path");
 
     if (!pathToRevalidate) {
-      return new Response(
-        JSON.stringify({ error: "Missing path parameter" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Missing path parameter" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     console.log("[AUTOMATE] Triggering webhook for:", pathToRevalidate);
@@ -83,15 +80,15 @@ export default async function handler(request, context) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: pathToRevalidate })
-      }
+        body: JSON.stringify({ path: pathToRevalidate }),
+      },
     );
 
     return new Response(
       JSON.stringify({
-        message: `Automate triggered for ${pathToRevalidate}`
+        message: `Automate triggered for ${pathToRevalidate}`,
       }),
-      { headers: { "Content-Type": "application/json" } }
+      { headers: { "Content-Type": "application/json" } },
     );
   }
 
@@ -99,20 +96,19 @@ export default async function handler(request, context) {
   // IP WHITELISTING (ONLY FOR /editor-dashboard)
   // ============================================
 
-  if (request.url.includes('/editor-dashboard')) {
-
+  if (request.url.includes("/editor-dashboard")) {
     const allowedIPs = [
       "127.0.0.1",
       "::1",
       "154.84.245.58",
       "34.206.81.169",
-      "27.107.90.206"
+      "27.107.90.206",
     ];
 
     const clientIP = request.headers.get("x-forwarded-for") || "";
-    const clientIPList = clientIP.split(",").map(ip => ip.trim());
+    const clientIPList = clientIP.split(",").map((ip) => ip.trim());
 
-    const allowed = clientIPList.some(ip => allowedIPs.includes(ip));
+    const allowed = clientIPList.some((ip) => allowedIPs.includes(ip));
 
     if (!allowed) {
       return new Response(
@@ -120,9 +116,9 @@ export default async function handler(request, context) {
           error: "Forbidden",
           message: "Your IP address is not in the whitelist.",
           your_ip: clientIPList[0],
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         }),
-        { status: 403, headers: { "Content-Type": "application/json" } }
+        { status: 403, headers: { "Content-Type": "application/json" } },
       );
     }
 
@@ -133,11 +129,11 @@ export default async function handler(request, context) {
   // REWRITE LOGIC - ONLY FOR PRODUCTION DOMAIN
   // ============================================
 
-  const productionDomains = [
-    "launchassignment-b6f4d9.contentstackapps.com"
-  ];
+  const productionDomains = ["launchassignment-b6f4d9.contentstackapps.com"];
 
-  const isProductionDomain = productionDomains.some(domain => hostname.includes(domain));
+  const isProductionDomain = productionDomains.some((domain) =>
+    hostname.includes(domain),
+  );
 
   if (pathname === "/latest" && isProductionDomain) {
     const rewriteUrl = new URL(request.url);
@@ -189,7 +185,7 @@ export default async function handler(request, context) {
     OAUTH_CLIENT_ID: context.env.OAUTH_CLIENT_ID,
     OAUTH_CLIENT_SECRET: context.env.OAUTH_CLIENT_SECRET,
     OAUTH_REDIRECT_URI: context.env.OAUTH_REDIRECT_URI,
-    OAUTH_TOKEN_URL: context.env.OAUTH_TOKEN_URL
+    OAUTH_TOKEN_URL: context.env.OAUTH_TOKEN_URL,
   };
 
   // Skip auth for static assets
@@ -207,7 +203,10 @@ export default async function handler(request, context) {
     const authCode = url.searchParams.get("code");
 
     if (authCode) {
-      const tokens = await exchangeAuthCodeForTokens(authCode, oauthCredentials);
+      const tokens = await exchangeAuthCodeForTokens(
+        authCode,
+        oauthCredentials,
+      );
       const jwtToken = await createJwtToken(tokens, oauthCredentials);
       const response = redirectTo("/author-tools");
       return setCookie(response, "jwt", jwtToken);
@@ -230,7 +229,7 @@ export default async function handler(request, context) {
     try {
       const verified = await jwt.verify(
         jwtToken,
-        oauthCredentials.OAUTH_CLIENT_SECRET
+        oauthCredentials.OAUTH_CLIENT_SECRET,
       );
 
       if (verified) {
@@ -253,37 +252,45 @@ function getUnauthorizedResponse(message) {
   const response = new Response(message, {
     status: 401,
   });
-  response.headers.set('WWW-Authenticate', 'Basic realm="Contentstack Launch Protected Area"');
+  response.headers.set(
+    "WWW-Authenticate",
+    'Basic realm="Contentstack Launch Protected Area"',
+  );
   return response;
 }
 
 function parseCredentials(authorization) {
-  const [, base64Credentials] = authorization.split(' ');
+  const [, base64Credentials] = authorization.split(" ");
   const decoded = atob(base64Credentials);
-  const [inputUsername, inputPassword] = decoded.split(':');
+  const [inputUsername, inputPassword] = decoded.split(":");
   return [inputUsername, inputPassword];
 }
 
 function handlePasswordProtection(request, passwordProtection) {
-  const authorization = request.headers.get('authorization');
+  const authorization = request.headers.get("authorization");
 
   if (!authorization) {
-    return getUnauthorizedResponse('Provide Username and Password to access this page.');
+    return getUnauthorizedResponse(
+      "Provide Username and Password to access this page.",
+    );
   }
 
   try {
     const [inputUsername, inputPassword] = parseCredentials(authorization);
 
-    if (inputUsername !== passwordProtection.username || inputPassword !== passwordProtection.password) {
+    if (
+      inputUsername !== passwordProtection.username ||
+      inputPassword !== passwordProtection.password
+    ) {
       return getUnauthorizedResponse(
-        'The Username and Password combination you have entered is invalid.'
+        "The Username and Password combination you have entered is invalid.",
       );
     }
 
     return null; // Authentication successful
   } catch (error) {
-    console.error('[AUTH] Error parsing credentials:', error);
-    return getUnauthorizedResponse('Invalid authentication format.');
+    console.error("[AUTH] Error parsing credentials:", error);
+    return getUnauthorizedResponse("Invalid authentication format.");
   }
 }
 
@@ -299,7 +306,7 @@ async function fetchWithCache(request, cacheControl) {
 
 function parseCookies(cookieString) {
   return cookieString.split(";").reduce((acc, cookie) => {
-    const [key, value] = cookie.split("=").map(c => c.trim());
+    const [key, value] = cookie.split("=").map((c) => c.trim());
     acc[key] = value;
     return acc;
   }, {});
@@ -322,7 +329,7 @@ function timeNow() {
 function redirectTo(path) {
   return new Response(null, {
     status: 307,
-    headers: { Location: path }
+    headers: { Location: path },
   });
 }
 
@@ -335,8 +342,8 @@ async function exchangeAuthCodeForTokens(authCode, creds) {
       client_secret: creds.OAUTH_CLIENT_SECRET,
       code: authCode,
       redirect_uri: creds.OAUTH_REDIRECT_URI,
-      grant_type: "authorization_code"
-    })
+      grant_type: "authorization_code",
+    }),
   });
 
   const data = await res.json();
@@ -344,10 +351,13 @@ async function exchangeAuthCodeForTokens(authCode, creds) {
   return data;
 }
 
-async function createJwtToken({ access_token, refresh_token, expires_in }, creds) {
+async function createJwtToken(
+  { access_token, refresh_token, expires_in },
+  creds,
+) {
   const exp = timeNow() + expires_in;
   return jwt.sign(
     { accessToken: access_token, refreshToken: refresh_token, exp },
-    creds.OAUTH_CLIENT_SECRET
+    creds.OAUTH_CLIENT_SECRET,
   );
 }

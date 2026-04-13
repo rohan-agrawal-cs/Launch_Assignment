@@ -9,8 +9,6 @@ export async function GET() {
   // Sample Contentstack asset URL - replace with actual asset UID if needed
   const assetUrl = `https://images.contentstack.io/v3/assets/bltd932e43f7244d14c/blt4d63bba14a3eb134/logo.png`;
 
-  console.log(`[ASSET-${reqId}] Making 10 concurrent asset fetches...`);
-
   const promises = Array.from({ length: 10 }, async (_, i) => {
     try {
       const response = await fetch(assetUrl, {
