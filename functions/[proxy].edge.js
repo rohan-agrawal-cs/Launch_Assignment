@@ -82,58 +82,41 @@ async function sanitizeEdgeLocaleDemoHtml(originResponse, demoCache) {
 }
 
 /**
- * Optional Worker cache. Launch CDN may not expose caches.default or may
- * reject cf on fetch — never throw; fall back to origin-only.
+ * Use Cloudflare native cache via cf.cacheEverything + cacheKey.
+ * Bypasses caches.default which Launch CDN restricts.
  */
 async function handleEdgeLocaleDemo(request, upstream, demoCache) {
-  const fetchOrigin = () =>
-    fetch(forwardOriginForEdgeCache(request, upstream));
-
-  if (!workerCachesAvailable()) {
-    const originRes = await fetchOrigin();
-    const out = await sanitizeEdgeLocaleDemoHtml(originRes, demoCache);
-    out.headers.set("X-Edge-Locale-Demo-Cache", "SKIP-NO-CACHE-API");
-    return out;
-  }
-
   try {
-    const cacheKeyRequest = new Request(upstream.toString(), {
-      method: "GET",
-      headers: { "Accept": "text/html" },
+    // Use the locale query param as the cache key
+    const locale = upstream.searchParams.get("locale") || "en-us";
+    const cacheKey = `${upstream.origin}${upstream.pathname}?locale=${locale}`;
+    
+    // Fetch with Cloudflare cache options
+    const originRequest = forwardOriginForEdgeCache(request, upstream);
+    
+    const originRes = await fetch(originRequest, {
+      cf: {
+        cacheTtl: 60,
+        cacheEverything: true,
+        cacheKey: cacheKey,
+      },
     });
-
-    const cached = await caches.default.match(cacheKeyRequest);
-    if (cached) {
-      const body = await cached.text();
-      const out = new Response(body, {
-        status: cached.status,
-        statusText: cached.statusText,
-        headers: new Headers(cached.headers),
-      });
-      out.headers.set("X-Edge-Locale-Demo-Cache", "HIT");
-      return out;
-    }
-
-    const originRes = await fetchOrigin();
+    
+    // Check if response came from cache
+    const cfCacheStatus = originRes.headers.get("CF-Cache-Status");
+    const cacheStatus = cfCacheStatus === "HIT" ? "HIT" : "MISS";
+    
     const out = await sanitizeEdgeLocaleDemoHtml(originRes, demoCache);
-    out.headers.set("X-Edge-Locale-Demo-Cache", "MISS");
-
-    if (out.ok && out.status === 200) {
-      try {
-        const cacheResponse = out.clone();
-        await caches.default.put(cacheKeyRequest, cacheResponse);
-        console.log("[EDGE_LOCALE_DEMO] Successfully cached:", upstream.toString());
-      } catch (e) {
-        console.error("[EDGE_LOCALE_DEMO] caches.default.put failed:", e.message, e.stack);
-      }
-    }
-
+    out.headers.set("X-Edge-Locale-Demo-Cache", cacheStatus);
+    out.headers.set("X-CF-Cache-Status-Original", cfCacheStatus || "none");
+    
     return out;
   } catch (e) {
-    console.error("[EDGE_LOCALE_DEMO] worker cache path failed:", e.message, e.stack);
-    const originRes = await fetchOrigin();
+    console.error("[EDGE_LOCALE_DEMO] cache fetch failed:", e.message);
+    const originRequest = forwardOriginForEdgeCache(request, upstream);
+    const originRes = await fetch(originRequest);
     const out = await sanitizeEdgeLocaleDemoHtml(originRes, demoCache);
-    out.headers.set("X-Edge-Locale-Demo-Cache", "FALLBACK");
+    out.headers.set("X-Edge-Locale-Demo-Cache", "ERROR");
     out.headers.set("X-Edge-Cache-Error", e.message || "unknown");
     return out;
   }
