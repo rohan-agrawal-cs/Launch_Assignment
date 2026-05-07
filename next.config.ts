@@ -1,4 +1,9 @@
 import type { NextConfig } from "next";
+import path from "path";
+import { fileURLToPath } from "url";
+
+/** Directory containing this config — fixes Tailwind/postcss resolving from a parent folder (e.g. Desktop) when cwd or Turbopack root is wrong. */
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -31,8 +36,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '2mb',
     },
   },
-  // Empty turbopack config to acknowledge we're using Turbopack
-  turbopack: {},
+  turbopack: {
+    root: projectRoot,
+  },
 };
 
 export default nextConfig;

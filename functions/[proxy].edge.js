@@ -1,5 +1,18 @@
 import jwt from "@tsndr/cloudflare-worker-jwt";
 
+/** Cloudflare sets `request.cf.country`; fall back to headers some stacks inject. */
+function getVisitorCountry(request) {
+  const cfCountry = request.cf?.country;
+  if (typeof cfCountry === "string" && cfCountry.length > 0) {
+    return cfCountry;
+  }
+  const cfHeader = request.headers.get("CF-IPCountry");
+  if (cfHeader) return cfHeader.trim();
+  const visitor = request.headers.get("visitor-ip-country");
+  if (visitor) return visitor.trim();
+  return "US";
+}
+
 export default async function handler(request, context) {
   const url = new URL(request.url);
   const hostname = url.hostname;
@@ -31,7 +44,7 @@ export default async function handler(request, context) {
   // LOCALE DETECTION & ROUTING (BASED ON COUNTRY)
   // ============================================
 
-  const country = request.headers.get("visitor-ip-country") || "US";
+  const country = getVisitorCountry(request);
 
   // Only redirect India users, let everyone else pass through normally
   if (country === "IN" && pathname === "/") {
@@ -57,6 +70,31 @@ export default async function handler(request, context) {
     cacheControl = "public, max-age=30, stale-while-revalidate=30";
   } else if (pathname.startsWith("/blog/") && pathname !== "/blog/latest") {
     cacheControl = "public, max-age=600, stale-while-revalidate=300";
+  }
+
+  // ============================================
+  // EDGE LOCALE DEMO — /edge-locale-demo
+  // Internal rewrite: origin sees ?locale=… from geo (IN → hi-in, else en-us).
+  // URL in the browser stays /edge-locale-demo (no redirect). If ?locale= is
+  // already present, it is forwarded unchanged.
+  // ============================================
+  if (pathname === "/edge-locale-demo") {
+    const upstream = new URL(request.url);
+    if (!upstream.searchParams.has("locale")) {
+      const geo = getVisitorCountry(request);
+      const inferred = geo === "IN" ? "hi-in" : "en-us";
+      upstream.searchParams.set("locale", inferred);
+      console.log(
+        `[EDGE_LOCALE_DEMO] rewrite → ${upstream.pathname}${upstream.search} (country=${geo})`,
+      );
+    } else {
+      console.log(
+        `[EDGE_LOCALE_DEMO] passthrough locale=${upstream.searchParams.get("locale")}`,
+      );
+    }
+    const demoCache =
+      "public, max-age=60, stale-while-revalidate=300, s-maxage=60";
+    return fetchWithCache(new Request(upstream, request), demoCache);
   }
 
   // ============================================
