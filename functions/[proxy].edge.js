@@ -51,16 +51,33 @@ function forwardOriginForEdgeCache(request, upstreamUrl) {
 /** Strip Next anti-edge-cache headers; set public TTL for caches.default + clients. */
 async function sanitizeEdgeLocaleDemoHtml(originResponse, demoCache) {
   const body = await originResponse.text();
+  const headers = new Headers();
+  
+  // Copy safe headers only
+  for (const [key, value] of originResponse.headers.entries()) {
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerKey !== "set-cookie" &&
+      lowerKey !== "vary" &&
+      lowerKey !== "cache-control" &&
+      lowerKey !== "cdn-cache-control" &&
+      lowerKey !== "age" &&
+      lowerKey !== "expires"
+    ) {
+      headers.set(key, value);
+    }
+  }
+  
+  // Set cache headers
+  headers.set("Cache-Control", demoCache);
+  headers.set("CDN-Cache-Control", demoCache);
+  
   const modified = new Response(body, {
-    status: originResponse.status,
-    statusText: originResponse.statusText,
-    headers: new Headers(originResponse.headers),
+    status: 200,
+    statusText: "OK",
+    headers: headers,
   });
-  modified.headers.delete("Set-Cookie");
-  modified.headers.delete("Vary");
-  modified.headers.delete("Cache-Control");
-  modified.headers.set("Cache-Control", demoCache);
-  modified.headers.set("CDN-Cache-Control", demoCache);
+  
   return modified;
 }
 
@@ -80,11 +97,19 @@ async function handleEdgeLocaleDemo(request, upstream, demoCache) {
   }
 
   try {
-    const cacheKeyRequest = new Request(upstream.toString(), { method: "GET" });
+    const cacheKeyRequest = new Request(upstream.toString(), {
+      method: "GET",
+      headers: { "Accept": "text/html" },
+    });
 
     const cached = await caches.default.match(cacheKeyRequest);
     if (cached) {
-      const out = new Response(cached.body, cached);
+      const body = await cached.text();
+      const out = new Response(body, {
+        status: cached.status,
+        statusText: cached.statusText,
+        headers: new Headers(cached.headers),
+      });
       out.headers.set("X-Edge-Locale-Demo-Cache", "HIT");
       return out;
     }
@@ -93,20 +118,23 @@ async function handleEdgeLocaleDemo(request, upstream, demoCache) {
     const out = await sanitizeEdgeLocaleDemoHtml(originRes, demoCache);
     out.headers.set("X-Edge-Locale-Demo-Cache", "MISS");
 
-    if (out.ok) {
+    if (out.ok && out.status === 200) {
       try {
-        await caches.default.put(cacheKeyRequest, out.clone());
+        const cacheResponse = out.clone();
+        await caches.default.put(cacheKeyRequest, cacheResponse);
+        console.log("[EDGE_LOCALE_DEMO] Successfully cached:", upstream.toString());
       } catch (e) {
-        console.log("[EDGE_LOCALE_DEMO] caches.default.put failed:", e);
+        console.error("[EDGE_LOCALE_DEMO] caches.default.put failed:", e.message, e.stack);
       }
     }
 
     return out;
   } catch (e) {
-    console.log("[EDGE_LOCALE_DEMO] worker cache path failed, origin only:", e);
+    console.error("[EDGE_LOCALE_DEMO] worker cache path failed:", e.message, e.stack);
     const originRes = await fetchOrigin();
     const out = await sanitizeEdgeLocaleDemoHtml(originRes, demoCache);
     out.headers.set("X-Edge-Locale-Demo-Cache", "FALLBACK");
+    out.headers.set("X-Edge-Cache-Error", e.message || "unknown");
     return out;
   }
 }
