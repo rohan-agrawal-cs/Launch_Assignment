@@ -13,6 +13,32 @@ function getVisitorCountry(request) {
   return "US";
 }
 
+/** Origin fetch for cacheable HTML: drop headers that make CF skip cache / vary by user. */
+function forwardOriginForEdgeCache(request, upstreamUrl) {
+  const h = new Headers(request.headers);
+  for (const name of [
+    "cookie",
+    "Cookie",
+    "authorization",
+    "Authorization",
+    "cache-control",
+    "Cache-Control",
+    "pragma",
+    "Pragma",
+  ]) {
+    h.delete(name);
+  }
+  const init = {
+    method: request.method,
+    headers: h,
+    redirect: request.redirect,
+  };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = request.body;
+  }
+  return new Request(upstreamUrl, init);
+}
+
 export default async function handler(request, context) {
   const url = new URL(request.url);
   const hostname = url.hostname;
@@ -94,7 +120,16 @@ export default async function handler(request, context) {
     }
     const demoCache =
       "public, max-age=60, stale-while-revalidate=300, s-maxage=60";
-    return fetchWithCache(new Request(upstream, request), demoCache);
+    // Same browser URL (/edge-locale-demo) for IN vs US would share one CDN
+    // entry by default. cf.cacheKey ties the edge cache to the rewritten URL
+    // (includes ?locale=) so each locale is cached separately.
+    const originReq = forwardOriginForEdgeCache(request, upstream);
+    return fetchWithCache(
+      originReq,
+      demoCache,
+      { cacheKey: upstream.toString(), cacheEverything: true },
+      { stripSetCookie: true },
+    );
   }
 
   // ============================================
@@ -332,13 +367,19 @@ function handlePasswordProtection(request, passwordProtection) {
   }
 }
 
-async function fetchWithCache(request, cacheControl) {
-  const response = await fetch(request);
+async function fetchWithCache(request, cacheControl, cfFetchOptions, cacheSanitize) {
+  const response = cfFetchOptions
+    ? await fetch(request, { cf: cfFetchOptions })
+    : await fetch(request);
 
   if (!cacheControl) return response;
 
   const modified = new Response(response.body, response);
+  if (cacheSanitize?.stripSetCookie) {
+    modified.headers.delete("Set-Cookie");
+  }
   modified.headers.set("Cache-Control", cacheControl);
+  modified.headers.set("CDN-Cache-Control", cacheControl);
   return modified;
 }
 
