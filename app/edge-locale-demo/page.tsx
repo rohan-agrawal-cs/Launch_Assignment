@@ -4,6 +4,9 @@ type Props = {
   searchParams: Promise<{ locale?: string }>;
 };
 
+export const dynamic = "force-dynamic";
+export const revalidate = 60;
+
 /**
  * Demo: `locale` from the query string for the SDK. On Cloudflare, the edge
  * worker rewrites bare `/edge-locale-demo` to the origin with `?locale=…`.
