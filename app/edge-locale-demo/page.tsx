@@ -6,9 +6,9 @@ type Props = {
 
 /**
  * Demo: `locale` from the query string for the SDK. On Cloudflare, the edge
- * worker rewrites bare `/edge-locale-demo` to the origin with `?locale=…`
- * (no browser redirect). The worker sets `cf.cacheKey` to that rewritten URL
- * so CDN cache is split per locale even when the browser URL has no query.
+ * worker rewrites bare `/edge-locale-demo` to the origin with `?locale=…`.
+ * `CF-Cache-Status` may stay BYPASS on devcontentstackapps.com; the worker
+ * uses caches.default and sets `X-Edge-Locale-Demo-Cache: HIT | MISS`.
  * Local dev: add `?locale=` yourself.
  */
 export default async function EdgeLocaleDemoPage({ searchParams }: Props) {

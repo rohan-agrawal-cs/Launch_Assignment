@@ -39,6 +39,50 @@ function forwardOriginForEdgeCache(request, upstreamUrl) {
   return new Request(upstreamUrl, init);
 }
 
+/** Strip Next anti-edge-cache headers; set public TTL for caches.default + clients. */
+function sanitizeEdgeLocaleDemoHtml(originResponse, demoCache) {
+  const modified = new Response(originResponse.body, originResponse);
+  modified.headers.delete("Set-Cookie");
+  modified.headers.delete("Vary");
+  modified.headers.set("Cache-Control", demoCache);
+  modified.headers.set("CDN-Cache-Control", demoCache);
+  return modified;
+}
+
+/**
+ * CDN `CF-Cache-Status` often stays BYPASS on devcontentstackapps.com HTML.
+ * Cache at the Worker with caches.default so repeat GETs skip origin anyway.
+ * Check X-Edge-Locale-Demo-Cache: HIT | MISS (not CF-Cache-Status).
+ */
+async function handleEdgeLocaleDemo(request, upstream, demoCache) {
+  const cacheKeyRequest = new Request(upstream.toString(), { method: "GET" });
+
+  const cached = await caches.default.match(cacheKeyRequest);
+  if (cached) {
+    const out = new Response(cached.body, cached);
+    out.headers.set("X-Edge-Locale-Demo-Cache", "HIT");
+    return out;
+  }
+
+  const originReq = forwardOriginForEdgeCache(request, upstream);
+  const originRes = await fetch(originReq, {
+    cf: { cacheKey: upstream.toString(), cacheEverything: true },
+  });
+
+  const out = sanitizeEdgeLocaleDemoHtml(originRes, demoCache);
+  out.headers.set("X-Edge-Locale-Demo-Cache", "MISS");
+
+  if (out.ok) {
+    try {
+      await caches.default.put(cacheKeyRequest, out.clone());
+    } catch (e) {
+      console.log("[EDGE_LOCALE_DEMO] caches.default.put failed:", e);
+    }
+  }
+
+  return out;
+}
+
 export default async function handler(request, context) {
   const url = new URL(request.url);
   const hostname = url.hostname;
@@ -101,8 +145,8 @@ export default async function handler(request, context) {
   // ============================================
   // EDGE LOCALE DEMO — /edge-locale-demo
   // Internal rewrite: origin sees ?locale=… from geo (IN → hi-in, else en-us).
-  // URL in the browser stays /edge-locale-demo (no redirect). If ?locale= is
-  // already present, it is forwarded unchanged.
+  // Worker Cache API (caches.default): CF-Cache-Status may still be BYPASS on
+  // this host; use X-Edge-Locale-Demo-Cache: HIT | MISS to verify caching.
   // ============================================
   if (pathname === "/edge-locale-demo") {
     const upstream = new URL(request.url);
@@ -120,20 +164,16 @@ export default async function handler(request, context) {
     }
     const demoCache =
       "public, max-age=60, stale-while-revalidate=300, s-maxage=60";
-    // Same browser URL (/edge-locale-demo) for IN vs US would share one CDN
-    // entry by default. cf.cacheKey ties the edge cache to the rewritten URL
-    // (includes ?locale=) so each locale is cached separately.
-    const originReq = forwardOriginForEdgeCache(request, upstream);
-    return fetchWithCache(
-      originReq,
-      demoCache,
-      { cacheKey: upstream.toString(), cacheEverything: true },
-      {
-        stripSetCookie: true,
-        stripVary: true,
-        cfEdgeResponse: { cacheTtl: 60, cacheEverything: true },
-      },
-    );
+
+    if (request.method !== "GET") {
+      return fetchWithCache(
+        forwardOriginForEdgeCache(request, upstream),
+        null,
+        { cacheKey: upstream.toString(), cacheEverything: true },
+      );
+    }
+
+    return handleEdgeLocaleDemo(request, upstream, demoCache);
   }
 
   // ============================================
@@ -371,7 +411,7 @@ function handlePasswordProtection(request, passwordProtection) {
   }
 }
 
-async function fetchWithCache(request, cacheControl, cfFetchOptions, cacheSanitize) {
+async function fetchWithCache(request, cacheControl, cfFetchOptions) {
   const response = cfFetchOptions
     ? await fetch(request, { cf: cfFetchOptions })
     : await fetch(request);
@@ -379,29 +419,7 @@ async function fetchWithCache(request, cacheControl, cfFetchOptions, cacheSaniti
   if (!cacheControl) return response;
 
   const modified = new Response(response.body, response);
-  if (cacheSanitize?.stripSetCookie) {
-    modified.headers.delete("Set-Cookie");
-  }
-  // Next.js RSC sets Vary: rsc, next-router-… which often prevents CF from
-  // storing the document at the edge even when Cache-Control is public.
-  if (cacheSanitize?.stripVary) {
-    modified.headers.delete("Vary");
-  }
   modified.headers.set("Cache-Control", cacheControl);
-  modified.headers.set("CDN-Cache-Control", cacheControl);
-
-  // cf on subrequest fetch() does not cache the *client-facing* Worker response.
-  // Tell the edge to cache this outbound response (visitor → CF).
-  const cfEdge = cacheSanitize?.cfEdgeResponse;
-  if (cfEdge) {
-    return new Response(modified.body, {
-      status: modified.status,
-      statusText: modified.statusText,
-      headers: modified.headers,
-      cf: cfEdge,
-    });
-  }
-
   return modified;
 }
 
