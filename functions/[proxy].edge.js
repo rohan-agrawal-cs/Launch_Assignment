@@ -128,7 +128,11 @@ export default async function handler(request, context) {
       originReq,
       demoCache,
       { cacheKey: upstream.toString(), cacheEverything: true },
-      { stripSetCookie: true },
+      {
+        stripSetCookie: true,
+        stripVary: true,
+        cfEdgeResponse: { cacheTtl: 60, cacheEverything: true },
+      },
     );
   }
 
@@ -378,8 +382,26 @@ async function fetchWithCache(request, cacheControl, cfFetchOptions, cacheSaniti
   if (cacheSanitize?.stripSetCookie) {
     modified.headers.delete("Set-Cookie");
   }
+  // Next.js RSC sets Vary: rsc, next-router-… which often prevents CF from
+  // storing the document at the edge even when Cache-Control is public.
+  if (cacheSanitize?.stripVary) {
+    modified.headers.delete("Vary");
+  }
   modified.headers.set("Cache-Control", cacheControl);
   modified.headers.set("CDN-Cache-Control", cacheControl);
+
+  // cf on subrequest fetch() does not cache the *client-facing* Worker response.
+  // Tell the edge to cache this outbound response (visitor → CF).
+  const cfEdge = cacheSanitize?.cfEdgeResponse;
+  if (cfEdge) {
+    return new Response(modified.body, {
+      status: modified.status,
+      statusText: modified.statusText,
+      headers: modified.headers,
+      cf: cfEdge,
+    });
+  }
+
   return modified;
 }
 
